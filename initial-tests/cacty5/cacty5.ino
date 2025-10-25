@@ -12,14 +12,20 @@ AudioInputI2S        audioInput;         // audio shield: mic or line-in
 AudioAnalyzePeak     peak_L;
 AudioRecordQueue     recordQueue;        // recording queue
 AudioPlayQueue       playQueue;          // playback queue
+AudioEffectGranular  granular1;          // granular effect
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
 
 AudioConnection c1(audioInput,0,peak_L,0);
 AudioConnection c2(audioInput,0,recordQueue,0);
-AudioConnection c3(playQueue,0,audioOutput,0);
-AudioConnection c4(playQueue,0,audioOutput,1);
+AudioConnection c3(playQueue,0,granular1,0);
+AudioConnection c4(granular1,0,audioOutput,0);
+AudioConnection c5(granular1,0,audioOutput,1);
 
 AudioControlSGTL5000 audioShield;
+
+// Granular effect buffer
+#define GRANULAR_MEMORY_SIZE 16384
+short granularMemory[GRANULAR_MEMORY_SIZE];
 
 // Recording buffer - stores up to 5 seconds at 44.1kHz
 // ~172 blocks/sec × 5 sec = 860 blocks for 5 seconds
@@ -53,6 +59,12 @@ void setup() {
   audioShield.inputSelect(myInput);
   audioShield.volume(1.0);
   audioShield.micGain(50);
+
+  // Setup granular effect
+  granular1.begin(granularMemory, GRANULAR_MEMORY_SIZE);
+  granular1.setSpeed(0.8);  // Pitch down with speed less than 1
+  granular1.beginPitchShift(20); // Smaller number is less robotic
+
   Serial.begin(9600);
   Serial.println("Listening for sound...");
 }
@@ -81,6 +93,7 @@ void handleWaiting() {
 
       if (leftPeak > 1) {
         Serial.println("SOUND DETECTED - Starting recording...");
+
         recordQueue.begin();
         recordedBlocks = 0;
         recordingStartTime = millis();
@@ -107,7 +120,7 @@ void handleRecording() {
     } else {
       // Buffer full - stop recording
       recordQueue.end();
-      recordQueue.freeBuffer();
+      recordQueue.clear();
       Serial.println("Recording complete! Playing back...");
       playbackBlock = 0;
       currentState = PLAYING;
@@ -117,7 +130,10 @@ void handleRecording() {
   // Stop after 5 seconds
   if (millis() - recordingStartTime > 5000 && recordedBlocks > 0) {
     recordQueue.end();
-    Serial.println("Recording complete! Playing back...");
+    recordQueue.clear();
+    Serial.print("Recording timeout complete! Blocks recorded: ");
+    Serial.println(recordedBlocks);
+    Serial.println("Playing back...");
     playbackBlock = 0;
     currentState = PLAYING;
   }
@@ -141,6 +157,15 @@ void handlePlaying() {
     // Playback complete
     danceOFF();
     Serial.println("Playback complete! Listening for sound...");
+
+    // Add a delay to prevent immediate re-trigger
+    delay(1000);
+
+    // Clear peak detector reading to avoid false trigger
+    if (peak_L.available()) {
+      peak_L.read();
+    }
+
     recordedBlocks = 0;
     playbackBlock = 0;
     fps = 0;
