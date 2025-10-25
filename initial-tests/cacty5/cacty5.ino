@@ -51,8 +51,8 @@ void setup() {
   AudioMemory(20);
   audioShield.enable();
   audioShield.inputSelect(myInput);
-  audioShield.volume(0.5);
-  audioShield.micGain(36);
+  audioShield.volume(1.0);
+  audioShield.micGain(50);
   Serial.begin(9600);
   Serial.println("Listening for sound...");
 }
