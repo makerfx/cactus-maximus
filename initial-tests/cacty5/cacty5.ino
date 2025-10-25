@@ -1,3 +1,4 @@
+#include <Servo.h>
 #include <Audio.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -37,8 +38,16 @@ State currentState = WAITING;
 unsigned long recordingStartTime = 0;
 int playbackBlock = 0;
 
+// Servo
+Servo myServo;
+
 
 void setup() {
+  // Setup servo
+  myServo.attach(3);
+  myServo.write(93);  // Neutral position
+
+  // Audio setup
   AudioMemory(20);
   audioShield.enable();
   audioShield.inputSelect(myInput);
@@ -115,6 +124,11 @@ void handleRecording() {
 }
 
 void handlePlaying() {
+  // Start dancing on first playback block
+  if (playbackBlock == 0) {
+    danceON();
+  }
+
   // Play back recorded audio
   if (playbackBlock < recordedBlocks) {
     int16_t *ptr = playQueue.getBuffer();
@@ -125,10 +139,27 @@ void handlePlaying() {
     }
   } else {
     // Playback complete
+    danceOFF();
     Serial.println("Playback complete! Listening for sound...");
     recordedBlocks = 0;
     playbackBlock = 0;
     fps = 0;
     currentState = WAITING;
   }
+}
+
+
+void danceON() {
+  myServo.write(93);
+  for (int pos = 93; pos <= 110; pos++) {
+    myServo.write(pos);
+    Serial.print("ON: ");
+    Serial.println(pos);
+    delay(50);  // Adjust delay for speed
+  }
+}
+
+void danceOFF() {
+  myServo.write(93);
+  Serial.println("OFF: 93");
 }
