@@ -54,7 +54,7 @@ void setup() {
   myServo.write(93);  // Neutral position
 
   // Audio setup
-  AudioMemory(20);
+  AudioMemory(40);  // Increased from 20 to prevent glitches
   audioShield.enable();
   audioShield.inputSelect(myInput);
   audioShield.volume(1.0);
@@ -67,11 +67,26 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("Listening for sound...");
+  Serial.println("Type 'play' to replay last recording");
 }
 
 elapsedMillis fps;
 
 void loop() {
+  // Check for serial commands
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+
+    if (command == "play" && recordedBlocks > 0) {
+      Serial.println("Manual playback triggered!");
+      playbackBlock = 0;
+      currentState = PLAYING;
+    } else if (command == "play" && recordedBlocks == 0) {
+      Serial.println("No recording available to play");
+    }
+  }
+
   switch(currentState) {
     case WAITING:
       handleWaiting();
@@ -166,7 +181,7 @@ void handlePlaying() {
       peak_L.read();
     }
 
-    recordedBlocks = 0;
+    // DON'T reset recordedBlocks - keep the recording in memory!
     playbackBlock = 0;
     fps = 0;
     currentState = WAITING;
