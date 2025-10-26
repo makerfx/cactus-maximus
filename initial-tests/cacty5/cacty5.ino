@@ -4,6 +4,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <SerialFlash.h>
+#include "USBHost_t36.h"
 
 const int myInput = AUDIO_INPUT_LINEIN;
 // const int myInput = AUDIO_INPUT_MIC;
@@ -47,6 +48,12 @@ int playbackBlock = 0;
 // Servo
 Servo myServo;
 
+// USB Host for TV remote
+USBHost myusb;
+USBHub hub1(myusb);
+USBHIDParser hid1(myusb);
+KeyboardController keyboard1(myusb);
+
 
 void setup() {
   // Setup servo
@@ -65,14 +72,23 @@ void setup() {
   granular1.setSpeed(0.8);  // Pitch down with speed less than 1
   granular1.beginPitchShift(20); // Smaller number is less robotic
 
+  // Setup USB Host for TV remote
+  myusb.begin();
+  keyboard1.attachPress(OnPress);
+  keyboard1.attachExtrasPress(OnHIDExtrasPress);
+
   Serial.begin(9600);
   Serial.println("Listening for sound...");
   Serial.println("Type 'play' to replay last recording");
+  Serial.println("Press TV remote UP button to replay");
 }
 
 elapsedMillis fps;
 
 void loop() {
+  // Process USB Host events
+  myusb.Task();
+
   // Check for serial commands
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n');
@@ -202,4 +218,29 @@ void danceON() {
 void danceOFF() {
   myServo.write(93);
   Serial.println("OFF: 93");
+}
+
+// USB Host callback functions
+void OnPress(int key) {
+  Serial.print("Key pressed: ");
+  Serial.println(key);
+
+  // TV remote UP button = key 218
+  if (key == 218) {
+    triggerPlayback();
+  }
+}
+
+void OnHIDExtrasPress(uint32_t top, uint16_t key) {
+  OnPress(key);
+}
+
+void triggerPlayback() {
+  if (recordedBlocks > 0) {
+    Serial.println("TV Remote playback triggered!");
+    playbackBlock = 0;
+    currentState = PLAYING;
+  } else {
+    Serial.println("No recording available to play");
+  }
 }
