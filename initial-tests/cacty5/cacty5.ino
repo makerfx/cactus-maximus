@@ -69,9 +69,7 @@ KeyboardController keyboard1(myusb);
 
 
 void setup() {
-  // Setup servo
-  myServo.attach(3);
-  myServo.write(93);  // Neutral position
+  Serial.begin(9600);
 
   // Audio setup
   AudioMemory(40);  // Increased from 20 to prevent glitches
@@ -91,6 +89,9 @@ void setup() {
   mixer2.gain(0, 1.0);  // Granular output (right)
   mixer2.gain(1, 1.0);  // WAV output (right)
 
+
+ 
+
   // Setup USB Host for TV remote
   myusb.begin();
   keyboard1.attachPress(OnPress);
@@ -107,14 +108,23 @@ void setup() {
     }
   }
 
-  Serial.begin(9600);
-  Serial.println("Listening for sound...");
+   // Warning
+  Serial.println("Playing WARN.WAV from SD card...");
+  playFile("WARN.WAV");
+
+  // Setup servo
+  myServo.attach(3);
+  myServo.write(93);  // Neutral position
+
+ 
+  // Serial.println("Listening for sound...");
   Serial.println("Type 'play' to replay last recording");
   Serial.println("Press TV remote UP button to replay");
   Serial.println("Press TV remote DOWN button to play KART.wav");
 }
 
 elapsedMillis fps;
+elapsedMillis playDelayTime;
 
 void loop() {
   // Process USB Host events
@@ -151,19 +161,24 @@ void loop() {
 }
 
 void handleWaiting() {
+  if (playDelayTime > 60000) {
+    playDelay("DANCING.WAV");
+    playDelayTime = 0;
+  }
   if(fps > 24) {
     if (peak_L.available()) {
       fps=0;
-      uint8_t leftPeak=peak_L.read() * 30.0;
+      // DISABLED Peak Detection
+      // uint8_t leftPeak=peak_L.read() * 30.0;
 
-      if (leftPeak > 1) {
-        Serial.println("SOUND DETECTED - Starting recording...");
+      // if (leftPeak > 1) {
+      //   Serial.println("SOUND DETECTED - Starting recording...");
 
-        recordQueue.begin();
-        recordedBlocks = 0;
-        recordingStartTime = millis();
-        currentState = RECORDING;
-      }
+      //   recordQueue.begin();
+      //   recordedBlocks = 0;
+      //   recordingStartTime = millis();
+      //   currentState = RECORDING;
+      // }
     }
   }
 }
@@ -221,7 +236,7 @@ void handlePlaying() {
   } else {
     // Playback complete
     danceOFF();
-    Serial.println("Playback complete! Listening for sound...");
+    // Serial.println("Playback complete! Listening for sound...");
 
     // Add a delay to prevent immediate re-trigger
     delay(1000);
@@ -306,6 +321,31 @@ void playFile(const char *filename)
   }
 }
 
+void playDelay(const char *filename)
+{
+  
+  Serial.print("Playing file: ");
+  Serial.println(filename);
+
+  // Start playing the file.  This sketch continues to
+  // run while the file plays.
+  playWav1.play(filename);
+
+  // A brief delay for the library read WAV info
+  delay(25);
+
+  // Simply wait for the file to finish playing.
+  while (playWav1.isPlaying()) {
+    // uncomment these lines if you audio shield
+    // has the optional volume pot soldered
+    //float vol = analogRead(15);
+    //vol = vol / 1024;
+    // sgtl5000_1.volume(vol);
+    danceON();
+  }
+ danceOFF();
+}
+
 void handlePlayingWav() {
   Serial.println("Playing KART.WAV from SD card...");
 
@@ -315,7 +355,7 @@ void handlePlayingWav() {
 
   // Play the WAV file and switch to PLAYING_WAV state
   playFile("KART.WAV");
-  // recordQueue.begin();
+  recordQueue.begin();
   recordedBlocks = 0;
   recordingStartTime = millis();
   currentState = RECORDING;
