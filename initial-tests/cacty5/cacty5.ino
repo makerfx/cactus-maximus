@@ -13,20 +13,32 @@ AudioInputI2S        audioInput;         // audio shield: mic or line-in
 AudioAnalyzePeak     peak_L;
 AudioRecordQueue     recordQueue;        // recording queue
 AudioPlayQueue       playQueue;          // playback queue
+AudioPlaySdWav       playWav1;           // SD card WAV player
 AudioEffectGranular  granular1;          // granular effect
+AudioMixer4          mixer1;             // mixer for granular and WAV
+AudioMixer4          mixer2;             // mixer for right channel
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
 
 AudioConnection c1(audioInput,0,peak_L,0);
 AudioConnection c2(audioInput,0,recordQueue,0);
 AudioConnection c3(playQueue,0,granular1,0);
-AudioConnection c4(granular1,0,audioOutput,0);
-AudioConnection c5(granular1,0,audioOutput,1);
+AudioConnection c4(granular1,0,mixer1,0);
+AudioConnection c5(granular1,0,mixer2,0);
+AudioConnection c6(playWav1,0,mixer1,1);
+AudioConnection c7(playWav1,1,mixer2,1);
+AudioConnection c8(mixer1,0,audioOutput,0);
+AudioConnection c9(mixer2,0,audioOutput,1);
 
 AudioControlSGTL5000 audioShield;
 
 // Granular effect buffer
 #define GRANULAR_MEMORY_SIZE 16384
 short granularMemory[GRANULAR_MEMORY_SIZE];
+
+// SD card pins for Teensy built-in SD
+#define SDCARD_CS_PIN    BUILTIN_SDCARD
+#define SDCARD_MOSI_PIN  11  // not actually used
+#define SDCARD_SCK_PIN   13  // not actually used
 
 // Recording buffer - stores up to 5 seconds at 44.1kHz
 // ~172 blocks/sec × 5 sec = 860 blocks for 5 seconds
@@ -38,7 +50,8 @@ int recordedBlocks = 0;
 enum State {
   WAITING,
   RECORDING,
-  PLAYING
+  PLAYING,
+  PLAYING_WAV
 };
 
 State currentState = WAITING;
@@ -72,15 +85,33 @@ void setup() {
   granular1.setSpeed(0.8);  // Pitch down with speed less than 1
   granular1.beginPitchShift(20); // Smaller number is less robotic
 
+  // Setup mixers - channel 0 for granular, channel 1 for WAV playback
+  mixer1.gain(0, 1.0);  // Granular output (left)
+  mixer1.gain(1, 1.0);  // WAV output (left)
+  mixer2.gain(0, 1.0);  // Granular output (right)
+  mixer2.gain(1, 1.0);  // WAV output (right)
+
   // Setup USB Host for TV remote
   myusb.begin();
   keyboard1.attachPress(OnPress);
   keyboard1.attachExtrasPress(OnHIDExtrasPress);
 
+  // Setup SD card
+  SPI.setMOSI(SDCARD_MOSI_PIN);
+  SPI.setSCK(SDCARD_SCK_PIN);
+  if (!(SD.begin(SDCARD_CS_PIN))) {
+    // stop here, but print a message repetitively
+    while (1) {
+      Serial.println("Unable to access the SD card");
+      delay(500);
+    }
+  }
+
   Serial.begin(9600);
   Serial.println("Listening for sound...");
   Serial.println("Type 'play' to replay last recording");
   Serial.println("Press TV remote UP button to replay");
+  Serial.println("Press TV remote DOWN button to play KART.wav");
 }
 
 elapsedMillis fps;
@@ -102,7 +133,7 @@ void loop() {
       Serial.println("No recording available to play");
     }
   }
-
+  // Serial.println(currentState);
   switch(currentState) {
     case WAITING:
       handleWaiting();
@@ -112,6 +143,9 @@ void loop() {
       break;
     case PLAYING:
       handlePlaying();
+      break;
+    case PLAYING_WAV:
+      handlePlayingWav();
       break;
   }
 }
@@ -229,6 +263,10 @@ void OnPress(int key) {
   if (key == 218) {
     triggerPlayback();
   }
+  // TV remote DOWN button = key 217
+  else if (key == 217) {
+    currentState = PLAYING_WAV;
+  }
 }
 
 void OnHIDExtrasPress(uint32_t top, uint16_t key) {
@@ -243,4 +281,43 @@ void triggerPlayback() {
   } else {
     Serial.println("No recording available to play");
   }
+}
+
+void playFile(const char *filename)
+{
+  
+  Serial.print("Playing file: ");
+  Serial.println(filename);
+
+  // Start playing the file.  This sketch continues to
+  // run while the file plays.
+  playWav1.play(filename);
+
+  // A brief delay for the library read WAV info
+  delay(25);
+
+  // Simply wait for the file to finish playing.
+  while (playWav1.isPlaying()) {
+    // uncomment these lines if you audio shield
+    // has the optional volume pot soldered
+    //float vol = analogRead(15);
+    //vol = vol / 1024;
+    // sgtl5000_1.volume(vol);
+  }
+}
+
+void handlePlayingWav() {
+  Serial.println("Playing KART.WAV from SD card...");
+
+  // Make sure recordQueue is NOT running during WAV playback
+  // recordQueue.end();
+  // recordQueue.clear();
+
+  // Play the WAV file and switch to PLAYING_WAV state
+  playFile("KART.WAV");
+  // recordQueue.begin();
+  recordedBlocks = 0;
+  recordingStartTime = millis();
+  currentState = RECORDING;
+
 }
