@@ -25,6 +25,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 const int myInput = AUDIO_INPUT_LINEIN;
 // const int myInput = AUDIO_INPUT_MIC;
 
+
+// --------------------------------------------------------------------------------------------
+// autotune
+AudioAnalyzeNoteFrequency notefreq1;        // frequency detector
+AudioFilterBiquad        autotuneFilter1;   // filter (biquad, easy lowpass filter)    
+CustomAutoTune autotuner1;
+
+AudioAnalyzeNoteFrequency notefreq2;        // frequency detector
+AudioFilterBiquad        autotuneFilter2;   // filter (biquad, easy lowpass filter)    ]
+CustomAutoTune autotuner2;
+// --------------------------------------------------------------------------------------------
+
+
 AudioInputI2S        audioInput;         // audio shield: mic or line-in
 AudioAnalyzePeak     peak_L;
 AudioRecordQueue     recordQueue;        // recording queue
@@ -36,24 +49,18 @@ AudioMixer4          mixer1;             // mixer for granular and WAV
 AudioMixer4          mixer2;             // mixer for right channel
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
 
-// --------------------------------------------------------------------------------------------
-// autotune
-AudioAnalyzeNoteFrequency notefreq;        // frequency detector
-AudioFilterBiquad        autotuneFilter;   // filter (biquad, easy lowpass filter)    
-CustomAutoTune autotuner;
-// --------------------------------------------------------------------------------------------
-
 
 
 AudioConnection c1(audioInput,0,peak_L,0);
 AudioConnection c2(audioInput,0,recordQueue,0);
-AudioConnection c3(playQueue,0,autotuner,0);
-AudioConnection c4(autotuner,0,mixer1,0);
-//AudioConnection c5(granular2,0,mixer2,0);
-AudioConnection c6(playWav1,0,mixer1,1);
-AudioConnection c7(playWav1,1,mixer2,1);
-AudioConnection c8(mixer1,0,audioOutput,0);
-AudioConnection c9(mixer2,0,audioOutput,1);
+AudioConnection c3(playQueue,0,autotuner1,0); //mono
+AudioConnection c4(playQueue,0,autotuner2,0); //mono
+AudioConnection c5(granular1,0,mixer1,0);
+AudioConnection c6(granular2,0,mixer2,0);
+AudioConnection c7(playWav1,0,mixer1,1);
+AudioConnection c8(playWav1,1,mixer2,1);
+AudioConnection c9(mixer1,0,audioOutput,0);
+AudioConnection c10(mixer2,0,audioOutput,1);
 
 
 AudioControlSGTL5000 audioShield;
@@ -128,14 +135,20 @@ void setup() {
   granular2.beginPitchShift(20); // Smaller number is less robotic
 */
 
-  autotuneFilter.setLowpass(0, 3400, 0.707); // Butterworth filter configuration
-  notefreq.begin(0.15); // Initialize Yin Algorithm with a 15% threshold
-  autotuner.currFrequency = 20;
-  autotuner.manualPitchOffset = -.3;
+  autotuneFilter1.setLowpass(0, 3400, 0.707); // Butterworth filter configuration
+  notefreq1.begin(0.15); // Initialize Yin Algorithm with a 15% threshold
+  autotuner1.currFrequency = 20;
+  autotuner1.manualPitchOffset = -.3;
+
+  autotuneFilter2.setLowpass(0, 3400, 0.707); // Butterworth filter configuration
+  notefreq2.begin(0.15); // Initialize Yin Algorithm with a 15% threshold
+  autotuner2.currFrequency = 20;
+  autotuner2.manualPitchOffset = .7;
 
   // Setup mixers - channel 0 for granular, channel 1 for WAV playback
   mixer1.gain(0, 1.0);  // Granular output (left)
   mixer1.gain(1, 0.1);  // WAV output (left)
+
   mixer2.gain(0, 1.0);  // Granular output (right)
   mixer2.gain(1, 0.1);  // WAV output (right)
 
@@ -206,7 +219,8 @@ void setup() {
   AudioProcessorUsageMaxReset();                                
   AudioMemoryUsageMaxReset();
   //filter1.processorUsageMaxReset();
-  autotuner.processorUsageMaxReset();
+  autotuner1.processorUsageMaxReset();
+  autotuner2.processorUsageMaxReset();
 
 }
 
@@ -491,12 +505,22 @@ void updateDisplay() {
   display.display(); // actually display all of the above
 }
 void autotuneLoop() {
-  if(notefreq.available()) {
-    float note = notefreq.read();
-    float prob = notefreq.probability();
+  if(notefreq1.available()) {
+    float note = notefreq1.read();
+    float prob = notefreq1.probability();
     if(prob > 0.99) {
       if(note > 80 && note < 880) {
-        autotuner.currFrequency = note + 10;
+        autotuner1.currFrequency = note + 10;
+      }
+    }
+  }
+
+  if(notefreq2.available()) {
+    float note = notefreq2.read();
+    float prob = notefreq2.probability();
+    if(prob > 0.99) {
+      if(note > 80 && note < 880) {
+        autotuner2.currFrequency = note + 10;
       }
     }
   }
