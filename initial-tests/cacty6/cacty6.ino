@@ -72,6 +72,7 @@ enum State {
 };
 
 State currentState = WAITING;
+String stateText = "Initializing";
 unsigned long recordingStartTime = 0;
 int playbackBlock = 0;
 
@@ -84,11 +85,17 @@ USBHub hub1(myusb);
 USBHIDParser hid1(myusb);
 KeyboardController keyboard1(myusb);
 
-#define dancePartyPin 4
+#define dancePartyPin1 4
+#define dancePartyPin2 5
+
 
 void setup() {
   Serial.begin(115200);
-  pinMode(dancePartyPin, OUTPUT);
+  pinMode(dancePartyPin1, OUTPUT);
+  pinMode(dancePartyPin2, OUTPUT);
+  analogWrite(dancePartyPin1, 0);
+  analogWrite(dancePartyPin2, 0);
+  
     
   // Audio setup
   AudioMemory(40);  // Increased from 20 to prevent glitches
@@ -162,9 +169,11 @@ void setup() {
   myServo.write(93);  // Neutral position
 
  
-  analogWrite(dancePartyPin, 255);
-  delay(1000);
-  analogWrite(dancePartyPin, 0);
+  analogWrite(dancePartyPin1, 255);
+  analogWrite(dancePartyPin2, 255);
+  delay(2000);
+  analogWrite(dancePartyPin1, 0);
+  analogWrite(dancePartyPin2, 0);
   
 
   // Serial.println("Listening for sound...");
@@ -172,12 +181,7 @@ void setup() {
   Serial.println("Press TV remote UP button to replay");
   Serial.println("Press TV remote DOWN button to play KART.wav");
 
-  display.clearDisplay();
-  display.setCursor(0,0);
-  display.println("Play Btn -> Repeat");
-  display.println("UP button -> Repeat");
-  display.println("Down Btn -> Record");
-  display.display(); // actually display all of the above
+  updateDisplay();
 
 }
 
@@ -197,9 +201,7 @@ void loop() {
       Serial.println("Manual playback triggered!");
       playbackBlock = 0;
       currentState = PLAYING;
-      display.setCursor(0,3);
-      display.println("Playing...");
-      display.display();
+      updateDisplay();
 
     } else if (command == "play" && recordedBlocks == 0) {
       Serial.println("No recording available to play");
@@ -266,6 +268,7 @@ void handleRecording() {
       Serial.println("Recording complete! Playing back...");
       playbackBlock = 0;
       currentState = PLAYING;
+      updateDisplay();
     }
   }
 
@@ -278,6 +281,7 @@ void handleRecording() {
     Serial.println("Playing back...");
     playbackBlock = 0;
     currentState = PLAYING;
+    updateDisplay();
   }
 }
 
@@ -312,13 +316,15 @@ void handlePlaying() {
     playbackBlock = 0;
     fps = 0;
     currentState = WAITING;
+    updateDisplay();
   }
 }
 
 
 void danceON() {
   myServo.write(93);
-  analogWrite(dancePartyPin, 255);
+  analogWrite(dancePartyPin1, 255);
+  analogWrite(dancePartyPin2, 255);
   for (int pos = 93; pos <= 110; pos++) {
     myServo.write(pos);
     Serial.print("ON: ");
@@ -329,7 +335,8 @@ void danceON() {
 
 void danceOFF() {
   myServo.write(93);
-  analogWrite(dancePartyPin, 0);
+  analogWrite(dancePartyPin1, 0);
+  analogWrite(dancePartyPin2, 0);
   Serial.println("OFF: 93");
 }
 
@@ -346,6 +353,7 @@ void OnPress(int key) {
   else if (key == 217) {
     currentState = PLAYING_WAV;
   }
+  updateDisplay();
 }
 
 void OnHIDExtrasPress(uint32_t top, uint16_t key) {
@@ -357,6 +365,7 @@ void triggerPlayback() {
     Serial.println("TV Remote playback triggered!");
     playbackBlock = 0;
     currentState = PLAYING;
+    updateDisplay();
   } else {
     Serial.println("No recording available to play");
   }
@@ -423,8 +432,33 @@ void handlePlayingWav() {
   recordedBlocks = 0;
   recordingStartTime = millis();
   currentState = RECORDING;
-  display.setCursor(0,48);
-  display.println("Recording...");
-  display.display();
+  updateDisplay();
+
 
 }
+
+void updateDisplay() {
+
+   switch(currentState) {
+    case WAITING:
+      stateText = "Waiting...";
+      break;
+    case RECORDING:
+      stateText = "Recording...";
+      break;
+    case PLAYING:
+      stateText = "Dance Party!";
+      break;
+    case PLAYING_WAV:
+      stateText = "Get Ready!";
+      break;
+  }
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("DOWN BTN -> Record");
+  display.println("UP BTN   -> Repeat");
+  display.println("");
+  display.print(stateText);
+  display.display(); // actually display all of the above
+}
