@@ -43,8 +43,9 @@ AudioAnalyzePeak     peak_L;
 AudioRecordQueue     recordQueue;        // recording queue
 AudioPlayQueue       playQueue;          // playback queue
 AudioPlaySdWav       playWav1;           // SD card WAV player
-AudioEffectGranular  granular1;          // granular effect
-AudioEffectGranular  granular2;          // granular effect
+//AudioEffectGranular  granular1;          // granular effect
+//AudioEffectGranular  granular2;          // granular effect
+//AudioEffectChorus    chorus1;             //chorus effect
 AudioMixer4          mixer1;             // mixer for granular and WAV
 AudioMixer4          mixer2;             // mixer for right channel
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
@@ -52,11 +53,12 @@ AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
 
 
 AudioConnection c1(audioInput,0,peak_L,0);
-AudioConnection c2(audioInput,0,recordQueue,0);
-AudioConnection c3(playQueue,0,autotuner1,0); //mono
-AudioConnection c4(playQueue,0,autotuner2,0); //mono
-AudioConnection c5(granular1,0,mixer1,0);
-AudioConnection c6(granular2,0,mixer2,0);
+//AudioConnection c2(audioInput,0,recordQueue,0);
+
+AudioConnection c3(audioInput,0,autotuner1,0); //mono
+//AudioConnection c4(audioInput,0,autotuner2,0); //mono
+AudioConnection c5(autotuner1,0,mixer1,0);
+AudioConnection c6(autotuner2,0,mixer2,0);
 AudioConnection c7(playWav1,0,mixer1,1);
 AudioConnection c8(playWav1,1,mixer2,1);
 AudioConnection c9(mixer1,0,audioOutput,0);
@@ -66,11 +68,12 @@ AudioConnection c10(mixer2,0,audioOutput,1);
 AudioControlSGTL5000 audioShield;
 
 
-
+/*
 // Granular effect buffer
 #define GRANULAR_MEMORY_SIZE 16384
 short granularMemory1[GRANULAR_MEMORY_SIZE];
 short granularMemory2[GRANULAR_MEMORY_SIZE];
+*/
 
 // SD card pins for Teensy built-in SD
 #define SDCARD_CS_PIN    BUILTIN_SDCARD
@@ -118,11 +121,11 @@ void setup() {
   
     
   // Audio setup
-  AudioMemory(40);  // Increased from 20 to prevent glitches
+  AudioMemory(80);  // Increased from 20 to prevent glitches
   audioShield.enable();
   audioShield.inputSelect(myInput);
-  audioShield.volume(1.0);
-  audioShield.micGain(100);
+  audioShield.volume(.8);
+  //audioShield.micGain(100);
 
 /*
   // Setup granular effect
@@ -146,11 +149,11 @@ void setup() {
   autotuner2.manualPitchOffset = .7;
 
   // Setup mixers - channel 0 for granular, channel 1 for WAV playback
-  mixer1.gain(0, 1.0);  // Granular output (left)
-  mixer1.gain(1, 0.1);  // WAV output (left)
+  mixer1.gain(0, 1);  // Granular output (left)
+  mixer1.gain(1, 1);  // WAV output (left)
 
-  mixer2.gain(0, 1.0);  // Granular output (right)
-  mixer2.gain(1, 0.1);  // WAV output (right)
+  mixer2.gain(0, .2);  // Granular output (right)
+  mixer2.gain(1, .2);  // WAV output (right)
 
 
   //setup display
@@ -227,9 +230,25 @@ void setup() {
 elapsedMillis fps;
 elapsedMillis playDelayTime;
 
+unsigned long last_time = 0;
+
 void loop() {
 
+
   autotuneLoop();
+
+   if(millis() - last_time >= 1000) {
+    Serial.print("Proc = ");
+    Serial.print(AudioProcessorUsage());
+    Serial.print(" (");    
+    Serial.print(AudioProcessorUsageMax());
+    Serial.print("),  Mem = ");
+    Serial.print(AudioMemoryUsage());
+    Serial.print(" (");    
+    Serial.print(AudioMemoryUsageMax());
+    Serial.println(")");
+    last_time = millis();
+  }
 
   // Process USB Host events
   myusb.Task();
