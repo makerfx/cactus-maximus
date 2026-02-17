@@ -34,14 +34,32 @@ AudioEffectGranular  granular2;          // granular effect
 AudioMixer4          mixer1;             // mixer for granular and WAV
 AudioMixer4          mixer2;             // mixer for right channel
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
+AudioFilterStateVariable filter1; // low-pass filter
+AudioFilterStateVariable filter2; // low-pass filter
+AudioEffectChorus chorus1; // chorus effect
+AudioEffectChorus chorus2; // chorus effect
+AudioEffectChorus chorus3; // chorus effect
+
 
 AudioConnection c1(audioInput,0,peak_L,0);
 AudioConnection c2(audioInput,0,recordQueue,0);
-AudioConnection c3(playQueue,0,granular1,0);
-AudioConnection c4(granular1,0,mixer1,0);
-AudioConnection c5(granular2,0,mixer2,0);
+AudioConnection c3(audioInput,0,granular1,0);
+AudioConnection c31(audioInput,0,granular2,0);
+
+AudioConnection c4(granular1,0,filter1,0);
+AudioConnection c41(granular2,0,filter2,0);
+AudioConnection c42(filter2,0,chorus1,0);
+AudioConnection c43(filter2,0,chorus2,0);
+AudioConnection c44(filter2,0,chorus3,0);
+
+AudioConnection c5(filter1,0,mixer1,0);
+AudioConnection c51(chorus1,0,mixer2,0);
+AudioConnection c52(chorus2,0,mixer2,1);
+AudioConnection c53(chorus3,0,mixer2,2);
+
+
 AudioConnection c6(playWav1,0,mixer1,1);
-AudioConnection c7(playWav1,1,mixer2,1);
+AudioConnection c7(playWav1,1,mixer2,3);
 AudioConnection c8(mixer1,0,audioOutput,0);
 AudioConnection c9(mixer2,0,audioOutput,1);
 
@@ -51,6 +69,12 @@ AudioControlSGTL5000 audioShield;
 #define GRANULAR_MEMORY_SIZE 16384
 short granularMemory1[GRANULAR_MEMORY_SIZE];
 short granularMemory2[GRANULAR_MEMORY_SIZE];
+
+// Chorus delay buffer (must be audio_block_t sized) 
+short chorusBuffer1[512]; 
+short chorusBuffer2[640]; 
+short chorusBuffer3[768]; 
+
 
 // SD card pins for Teensy built-in SD
 #define SDCARD_CS_PIN    BUILTIN_SDCARD
@@ -88,6 +112,15 @@ KeyboardController keyboard1(myusb);
 #define dancePartyPin1 4
 #define dancePartyPin2 5
 
+// ------------------------------------------------------------
+// Convert semitone shift to granular speed ratio
+// Handles positive and negative semitone values
+// Formula: speed = 2^(semitones / 12)
+// ------------------------------------------------------------
+float semitone(int n) {
+    return powf(2.0f, (float)n / 12.0f);
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -101,23 +134,41 @@ void setup() {
   AudioMemory(40);  // Increased from 20 to prevent glitches
   audioShield.enable();
   audioShield.inputSelect(myInput);
-  audioShield.volume(1.0);
+  audioShield.volume(.5);
   audioShield.micGain(100);
 
   // Setup granular effect
   granular1.begin(granularMemory1, GRANULAR_MEMORY_SIZE);
-  granular1.setSpeed(0.8);  // Pitch down with speed less than 1
-  granular1.beginPitchShift(20); // Smaller number is less robotic
+  granular1.setSpeed(semitone(-5));  // Pitch down with speed less than 1
+  granular1.beginPitchShift(80); 
 
+  
+  
   granular2.begin(granularMemory2, GRANULAR_MEMORY_SIZE);
-  granular2.setSpeed(1.2);  // Pitch down with speed less than 1
-  granular2.beginPitchShift(20); // Smaller number is less robotic
+  granular2.setSpeed(semitone(+5));  
+  granular2.beginPitchShift(80); 
+
+  // --- Low-pass filter setup ---
+  filter1.frequency(9000);
+  filter2.frequency(9000);
+  // smooths out grain edges 
+  filter1.resonance(0.7); // gentle resonance
+  filter2.resonance(2); // gentle resonance
+
+  // --- Chorus setup --- 
+  chorus1.begin(chorusBuffer1, 512,3); 
+  delay(120); //spread out the LFOs
+  chorus2.begin(chorusBuffer2, 640,3); 
+  delay(530);
+  chorus3.begin(chorusBuffer3, 768,3); 
 
   // Setup mixers - channel 0 for granular, channel 1 for WAV playback
   mixer1.gain(0, 1.0);  // Granular output (left)
   mixer1.gain(1, 0.3);  // WAV output (left)
   mixer2.gain(0, 1.0);  // Granular output (right)
-  mixer2.gain(1, 0.3);  // WAV output (right)
+  mixer2.gain(1, 1.0);  // Granular output (right)
+  mixer2.gain(2, 1.0);  // Granular output (right)
+  mixer2.gain(3, 0.3);  // WAV output (right)
 
 
   //setup display
@@ -188,9 +239,26 @@ void setup() {
 elapsedMillis fps;
 elapsedMillis playDelayTime;
 
+
+unsigned long last_time = 0;
+
 void loop() {
   // Process USB Host events
   myusb.Task();
+
+  if(millis() - last_time >= 1000) {
+  Serial.print("Proc = ");
+  Serial.print(AudioProcessorUsage());
+  Serial.print(" (");    
+  Serial.print(AudioProcessorUsageMax());
+  Serial.print("),  Mem = ");
+  Serial.print(AudioMemoryUsage());
+  Serial.print(" (");    
+  Serial.print(AudioMemoryUsageMax());
+  Serial.println(")");
+  last_time = millis();
+}
+
 
   // Check for serial commands
   if (Serial.available() > 0) {
