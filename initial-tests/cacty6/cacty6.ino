@@ -31,37 +31,60 @@ AudioPlayQueue       playQueue;          // playback queue
 AudioPlaySdWav       playWav1;           // SD card WAV player
 AudioEffectGranular  granular1;          // granular effect
 AudioEffectGranular  granular2;          // granular effect
+AudioEffectGranular  granular3;          // granular effect
+AudioEffectGranular  granular4;          // granular effect
+
 AudioMixer4          mixer1;             // mixer for granular and WAV
 AudioMixer4          mixer2;             // mixer for right channel
 AudioOutputI2S       audioOutput;        // audio shield: headphones & line-out
 AudioFilterStateVariable filter1; // low-pass filter
 AudioFilterStateVariable filter2; // low-pass filter
-AudioEffectChorus chorus1; // chorus effect
+AudioFilterStateVariable filter3; // low-pass filter
+AudioFilterStateVariable filter4; // low-pass filter
+
+//not using a chorus on 1 (yet?) but keeping the numbering consistent
 AudioEffectChorus chorus2; // chorus effect
 AudioEffectChorus chorus3; // chorus effect
+AudioEffectChorus chorus4; // chorus effect
+
+AudioEffectDelay delay2; 
+AudioEffectDelay delay3; 
+AudioEffectDelay delay4;
 
 
-AudioConnection c1(audioInput,0,peak_L,0);
-AudioConnection c2(audioInput,0,recordQueue,0);
-AudioConnection c3(audioInput,0,granular1,0);
-AudioConnection c31(audioInput,0,granular2,0);
+AudioConnection aiP1(audioInput,0,peak_L,0);
+AudioConnection aiRq1(audioInput,0,recordQueue,0);
 
-AudioConnection c4(granular1,0,filter1,0);
-AudioConnection c41(granular2,0,filter2,0);
-AudioConnection c42(filter2,0,chorus1,0);
-AudioConnection c43(filter2,0,chorus2,0);
-AudioConnection c44(filter2,0,chorus3,0);
+AudioConnection pqG1(playQueue,0,granular1,0); 
+AudioConnection pqG2(playQueue,0,granular2,0);
+AudioConnection pqG3(playQueue,0,granular3,0);
+AudioConnection pqG4(playQueue,0,granular4,0); 
 
-AudioConnection c5(filter1,0,mixer1,0);
-AudioConnection c51(chorus1,0,mixer2,0);
-AudioConnection c52(chorus2,0,mixer2,1);
-AudioConnection c53(chorus3,0,mixer2,2);
+AudioConnection g1F1(granular1,0,filter1,0);
+AudioConnection g2F2(granular2,0,filter2,0);
+AudioConnection g3F3(granular3,0,filter3,0);
+AudioConnection g4F4(granular4,0,filter4,0);
+
+AudioConnection f2C2(filter2,0,delay2,0);
+AudioConnection f3C3(filter3,0,delay3,0);
+AudioConnection f4C4(filter4,0,delay4,0);
+
+AudioConnection d2C2(delay2,0,chorus2,0);
+AudioConnection d3C3(delay3,0,chorus3,0);
+AudioConnection d4C4(delay4,0,chorus4,0);
 
 
-AudioConnection c6(playWav1,0,mixer1,1);
-AudioConnection c7(playWav1,1,mixer2,3);
-AudioConnection c8(mixer1,0,audioOutput,0);
-AudioConnection c9(mixer2,0,audioOutput,1);
+AudioConnection f1M1(filter1,0,mixer1,1);   //left
+
+AudioConnection c2M2(chorus2,0,mixer2,1); //right
+AudioConnection c3M2(chorus3,0,mixer2,2); //right
+AudioConnection c4M2(chorus4,0,mixer2,3); //right
+
+
+AudioConnection pwM1(playWav1,0,mixer1,0); //left
+AudioConnection pwM2(playWav1,1,mixer2,0); //right
+AudioConnection m1AO(mixer1,0,audioOutput,0);
+AudioConnection m2AO(mixer2,0,audioOutput,1);
 
 AudioControlSGTL5000 audioShield;
 
@@ -69,11 +92,13 @@ AudioControlSGTL5000 audioShield;
 #define GRANULAR_MEMORY_SIZE 16384
 short granularMemory1[GRANULAR_MEMORY_SIZE];
 short granularMemory2[GRANULAR_MEMORY_SIZE];
+short granularMemory3[GRANULAR_MEMORY_SIZE];
+short granularMemory4[GRANULAR_MEMORY_SIZE];
 
 // Chorus delay buffer (must be audio_block_t sized) 
-short chorusBuffer1[512]; 
-short chorusBuffer2[640]; 
-short chorusBuffer3[768]; 
+short chorusBuffer2[512]; 
+short chorusBuffer3[640]; 
+short chorusBuffer4[768]; 
 
 
 // SD card pins for Teensy built-in SD
@@ -84,7 +109,7 @@ short chorusBuffer3[768];
 // Recording buffer - stores up to 5 seconds at 44.1kHz
 // ~172 blocks/sec × 5 sec = 860 blocks for 5 seconds
 #define MAX_RECORDING_BLOCKS 860  // 5 seconds
-int16_t recordingBuffer[MAX_RECORDING_BLOCKS][128];  // Each block is 128 samples
+DMAMEM int16_t recordingBuffer[MAX_RECORDING_BLOCKS][128];  // Each block is 128 samples
 int recordedBlocks = 0;
 
 // State machine
@@ -121,6 +146,11 @@ float semitone(int n) {
     return powf(2.0f, (float)n / 12.0f);
 }
 
+void randomizeDelays() {
+  delay2.delay(0,random(20,60));
+  delay3.delay(0,random(40,80));
+  delay4.delay(0,random(60,100));
+}
 
 void setup() {
   Serial.begin(115200);
@@ -131,44 +161,61 @@ void setup() {
   
     
   // Audio setup
-  AudioMemory(40);  // Increased from 20 to prevent glitches
+  AudioMemory(200);  // Increased from 20 to prevent glitches
   audioShield.enable();
   audioShield.inputSelect(myInput);
-  audioShield.volume(.5);
+  audioShield.volume(.9);
   audioShield.micGain(100);
 
   // Setup granular effect
   granular1.begin(granularMemory1, GRANULAR_MEMORY_SIZE);
-  granular1.setSpeed(semitone(-5));  // Pitch down with speed less than 1
+  granular1.setSpeed(semitone(-4));  // Pitch down with speed less than 1
   granular1.beginPitchShift(80); 
 
-  
-  
+
   granular2.begin(granularMemory2, GRANULAR_MEMORY_SIZE);
-  granular2.setSpeed(semitone(+5));  
+  granular2.setSpeed(semitone(+3));  
   granular2.beginPitchShift(80); 
+
+  granular3.begin(granularMemory3, GRANULAR_MEMORY_SIZE);
+  granular3.setSpeed(semitone(+4));  
+  granular3.beginPitchShift(80);
+
+  granular4.begin(granularMemory4, GRANULAR_MEMORY_SIZE);
+  granular4.setSpeed(semitone(+5));  
+  granular4.beginPitchShift(80);
 
   // --- Low-pass filter setup ---
   filter1.frequency(9000);
   filter2.frequency(9000);
+  filter3.frequency(9000);
+  filter4.frequency(9000);
+
   // smooths out grain edges 
   filter1.resonance(0.7); // gentle resonance
   filter2.resonance(2); // gentle resonance
+  filter3.resonance(3); // gentle resonance
+  filter4.resonance(4); // gentle resonance
+
+  randomizeDelays();
+
+
 
   // --- Chorus setup --- 
-  chorus1.begin(chorusBuffer1, 512,3); 
-  delay(120); //spread out the LFOs
-  chorus2.begin(chorusBuffer2, 640,3); 
-  delay(530);
-  chorus3.begin(chorusBuffer3, 768,3); 
+  chorus2.begin(chorusBuffer2, 512,3); 
+  delay(37); //spread out the LFOs
+  chorus3.begin(chorusBuffer3, 640,3); 
+  delay(53);
+  chorus4.begin(chorusBuffer4, 768,3); 
 
   // Setup mixers - channel 0 for granular, channel 1 for WAV playback
-  mixer1.gain(0, 1.0);  // Granular output (left)
-  mixer1.gain(1, 0.3);  // WAV output (left)
-  mixer2.gain(0, 1.0);  // Granular output (right)
-  mixer2.gain(1, 1.0);  // Granular output (right)
-  mixer2.gain(2, 1.0);  // Granular output (right)
-  mixer2.gain(3, 0.3);  // WAV output (right)
+  mixer1.gain(0, 1);  // WAV output (left)
+  mixer1.gain(1, .7);  // Granular output (left)
+ 
+  mixer2.gain(0, 1);  // WAV output (right)
+  mixer2.gain(1, 1);  // Granular output (right)
+  mixer2.gain(2, 1);  // Granular output (right)
+  mixer2.gain(3, 1);  // Granular output (right)
 
 
   //setup display
@@ -206,13 +253,13 @@ void setup() {
   if (!(SD.begin(SDCARD_CS_PIN))) {
     // stop here, but print a message repetitively
     while (1) {
-      Serial.println("Unable to access the SD card");
+      Serial.println(F("Unable to access the SD card"));
       delay(500);
     }
   }
 
    // Warning
-  Serial.println("Playing WARN.WAV from SD card...");
+  Serial.println(F("Playing WARN.WAV from SD card..."));
   playFile("WARN.WAV");
 
   // Setup servo
@@ -246,7 +293,10 @@ void loop() {
   // Process USB Host events
   myusb.Task();
 
+
   if(millis() - last_time >= 1000) {
+  randomizeDelays();
+
   Serial.print("Proc = ");
   Serial.print(AudioProcessorUsage());
   Serial.print(" (");    
