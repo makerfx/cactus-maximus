@@ -25,9 +25,10 @@ const int myInput = AUDIO_INPUT_LINEIN;
 // const int myInput = AUDIO_INPUT_MIC;
 
 AudioInputI2S        audioInput;         // audio shield: mic or line-in
-AudioAnalyzePeak     peak_L;
 AudioRecordQueue     recordQueue;        // recording queue
 AudioPlayQueue       playQueue;          // playback queue
+AudioAnalyzePeak     peakIn;
+AudioAnalyzePeak     peakPq;
 AudioPlaySdWav       playWav1;           // SD card WAV player
 AudioEffectGranular  granular1;          // granular effect
 AudioEffectGranular  granular2;          // granular effect
@@ -52,13 +53,14 @@ AudioEffectDelay delay3;
 AudioEffectDelay delay4;
 
 
-AudioConnection aiP1(audioInput,0,peak_L,0);
+AudioConnection aiP1(audioInput,0,peakIn,0);
 AudioConnection aiRq1(audioInput,0,recordQueue,0);
 
 AudioConnection pqG1(playQueue,0,granular1,0); 
 AudioConnection pqG2(playQueue,0,granular2,0);
 AudioConnection pqG3(playQueue,0,granular3,0);
 AudioConnection pqG4(playQueue,0,granular4,0); 
+AudioConnection pqP1(playQueue,0,peakPq,0);
 
 AudioConnection g1F1(granular1,0,filter1,0);
 AudioConnection g2F2(granular2,0,filter2,0);
@@ -108,7 +110,7 @@ short chorusBuffer4[768];
 
 // Recording buffer - stores up to 5 seconds at 44.1kHz
 // ~172 blocks/sec × 5 sec = 860 blocks for 5 seconds
-#define MAX_RECORDING_BLOCKS 860  // 5 seconds
+#define MAX_RECORDING_BLOCKS 1700  // 172 per second
 DMAMEM int16_t recordingBuffer[MAX_RECORDING_BLOCKS][128];  // Each block is 128 samples
 int recordedBlocks = 0;
 
@@ -117,9 +119,11 @@ enum State {
   WAITING,
   RECORDING,
   PLAYING,
-  PLAYING_WAV
+  PLAYING_WAV,
+  PLAYING_COUNTDOWN
 };
 
+String wavFile = "";
 State currentState = WAITING;
 String stateText = "Initializing";
 unsigned long recordingStartTime = 0;
@@ -260,7 +264,7 @@ void setup() {
 
    // Warning
   Serial.println(F("Playing WARN.WAV from SD card..."));
-  playFile("WARN.WAV");
+  playFile("WARN.WAV", 0);
 
   // Setup servo
   myServo.attach(3);
@@ -339,19 +343,25 @@ void loop() {
     case PLAYING_WAV:
       handlePlayingWav();
       break;
+    case PLAYING_COUNTDOWN:
+      handlePlayingCountdown();
+      break;
   }
 }
 
 void handleWaiting() {
+  /* remove the periodic playback
   if (playDelayTime > 60000) {
     //playDelay("DANCING.WAV");
     playDelayTime = 0;
   }
+  */
+  /* remove audio in detection
   if(fps > 24) {
-    if (peak_L.available()) {
+    if (peakIn.available()) {
       fps=0;
       // DISABLED Peak Detection
-      // uint8_t leftPeak=peak_L.read() * 30.0;
+      // uint8_t leftPeak=peakIn.read() * 30.0;
 
       // if (leftPeak > 1) {
       //   Serial.println("SOUND DETECTED - Starting recording...");
@@ -363,6 +373,7 @@ void handleWaiting() {
       // }
     }
   }
+  */
 }
 
 void handleRecording() {
@@ -391,7 +402,7 @@ void handleRecording() {
   }
 
   // Stop after 5 seconds
-  if (millis() - recordingStartTime > 5000 && recordedBlocks > 0) {
+  if (millis() - recordingStartTime > 10000 && recordedBlocks > 0) {
     recordQueue.end();
     recordQueue.clear();
     Serial.print("Recording timeout complete! Blocks recorded: ");
@@ -404,10 +415,7 @@ void handleRecording() {
 }
 
 void handlePlaying() {
-  // Start dancing on first playback block
-  if (playbackBlock == 0) {
-    danceON();
-  }
+  
 
   // Play back recorded audio
   if (playbackBlock < recordedBlocks) {
@@ -417,18 +425,18 @@ void handlePlaying() {
       playQueue.playBuffer();
       playbackBlock++;
     }
-  } else {
+    // Dance when there is audio
+    uint8_t pqLevel =peakPq.read() * 30.0;
+    //todo: tweak this level for good detection
+    if (pqLevel > 2) danceON(); //this should delay start until audio has started...
+  } 
+  else {
     // Playback complete
     danceOFF();
     // Serial.println("Playback complete! Listening for sound...");
 
     // Add a delay to prevent immediate re-trigger
     delay(1000);
-
-    // Clear peak detector reading to avoid false trigger
-    if (peak_L.available()) {
-      peak_L.read();
-    }
 
     // DON'T reset recordedBlocks - keep the recording in memory!
     playbackBlock = 0;
@@ -440,6 +448,9 @@ void handlePlaying() {
 
 
 void danceON() {
+  //check if already on, and if already on, don't restart!
+  if (analogRead(dancePartyPin1)) return; 
+
   myServo.write(93);
   analogWrite(dancePartyPin1, 255);
   analogWrite(dancePartyPin2, 255);
@@ -448,6 +459,7 @@ void danceON() {
     Serial.print("ON: ");
     Serial.println(pos);
     delay(50);  // Adjust delay for speed
+    //todo: do this ramp without a delay!
   }
 }
 
@@ -469,6 +481,13 @@ void OnPress(int key) {
   }
   // TV remote DOWN button = key 217
   else if (key == 217) {
+    currentState = PLAYING_COUNTDOWN;
+  }
+  // TV remote ??? button = key ???
+  // todo - test keys and pick a good one :)
+  else if (key == 219) {
+    //play macarena
+    wavFile = "MACARENA.WAV";
     currentState = PLAYING_WAV;
   }
   updateDisplay();
@@ -489,7 +508,7 @@ void triggerPlayback() {
   }
 }
 
-void playFile(const char *filename)
+void playFile(const char *filename, bool dance)
 {
   
   Serial.print("Playing file: ");
@@ -504,11 +523,8 @@ void playFile(const char *filename)
 
   // Simply wait for the file to finish playing.
   while (playWav1.isPlaying()) {
-    // uncomment these lines if you audio shield
-    // has the optional volume pot soldered
-    //float vol = analogRead(15);
-    //vol = vol / 1024;
-    // sgtl5000_1.volume(vol);
+    if (dance) danceON();
+    else danceOFF();
   }
 }
 
@@ -537,7 +553,7 @@ void playDelay(const char *filename)
  danceOFF();
 }
 
-void handlePlayingWav() {
+void handlePlayingCountdown() {
   Serial.println("Playing KART.WAV from SD card...");
 
   // Make sure recordQueue is NOT running during WAV playback
@@ -545,14 +561,20 @@ void handlePlayingWav() {
   // recordQueue.clear();
 
   // Play the WAV file and switch to PLAYING_WAV state
-  playFile("KART.WAV");
+  playFile("KART.WAV",0);
   recordQueue.begin();
   recordedBlocks = 0;
   recordingStartTime = millis();
   currentState = RECORDING;
   updateDisplay();
+}
 
+void handlePlayingWav() {
+  Serial.println("Playing from SD card:" + wavFile);
 
+  // Play the WAV file and switch to PLAYING_WAV state
+  playFile(wavFile.c_str(), 1);
+  updateDisplay();
 }
 
 void updateDisplay() {
@@ -567,8 +589,11 @@ void updateDisplay() {
     case PLAYING:
       stateText = "Dance Party!";
       break;
-    case PLAYING_WAV:
+    case PLAYING_COUNTDOWN:
       stateText = "Get Ready!";
+      break;
+    case PLAYING_WAV:
+      stateText = "Playing: " + wavFile;
       break;
   }
 
