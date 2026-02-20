@@ -7,6 +7,7 @@
 #include "USBHost_t36.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Chrono.h>
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
@@ -23,6 +24,10 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 const int myInput = AUDIO_INPUT_LINEIN;
 // const int myInput = AUDIO_INPUT_MIC;
+
+Chrono danceRampChrono;
+Chrono perfStatsChrono;
+Chrono delayRandomizerChrono;
 
 AudioInputI2S        audioInput;         // audio shield: mic or line-in
 AudioRecordQueue     recordQueue;        // recording queue
@@ -119,7 +124,6 @@ enum State {
   WAITING,
   RECORDING,
   PLAYING,
-  PLAYING_WAV,
   PLAYING_COUNTDOWN
 };
 
@@ -128,9 +132,11 @@ State currentState = WAITING;
 String stateText = "Initializing";
 unsigned long recordingStartTime = 0;
 int playbackBlock = 0;
+bool dancing = 0;
 
 // Servo
 Servo myServo;
+uint8_t rampVal;
 
 // USB Host for TV remote
 USBHost myusb;
@@ -298,20 +304,34 @@ void loop() {
   myusb.Task();
 
 
-  if(millis() - last_time >= 1000) {
-  randomizeDelays();
+  if (dancing && currentState!=PLAYING && !playWav1.isPlaying() && playingCheckChrono.hasPassed(100)){
+    playingCheckChrono.restart();
+    danceOFF();
+  }
+ 
+  if (dancing && danceRampChrono.hasPassed(50)) {
+    danceRampChrono.restart();
+    danceRamp();
+  }
 
-  Serial.print("Proc = ");
-  Serial.print(AudioProcessorUsage());
-  Serial.print(" (");    
-  Serial.print(AudioProcessorUsageMax());
-  Serial.print("),  Mem = ");
-  Serial.print(AudioMemoryUsage());
-  Serial.print(" (");    
-  Serial.print(AudioMemoryUsageMax());
-  Serial.println(")");
-  last_time = millis();
-}
+
+  if (delayRandomizerChrono.hasPassed(100)) {
+      delayRandomizerChrono.restart();
+      randomizeDelays();
+  }
+
+  if (perfStatsChrono.hasPassed(2000)) {
+    perfStatsChrono.restart();
+    Serial.print("Proc = ");
+    Serial.print(AudioProcessorUsage());
+    Serial.print(" (");    
+    Serial.print(AudioProcessorUsageMax());
+    Serial.print("),  Mem = ");
+    Serial.print(AudioMemoryUsage());
+    Serial.print(" (");    
+    Serial.print(AudioMemoryUsageMax());
+    Serial.println(")");
+  }
 
 
   // Check for serial commands
@@ -339,9 +359,6 @@ void loop() {
       break;
     case PLAYING:
       handlePlaying();
-      break;
-    case PLAYING_WAV:
-      handlePlayingWav();
       break;
     case PLAYING_COUNTDOWN:
       handlePlayingCountdown();
@@ -415,7 +432,6 @@ void handleRecording() {
 }
 
 void handlePlaying() {
-  
 
   // Play back recorded audio
   if (playbackBlock < recordedBlocks) {
@@ -427,6 +443,7 @@ void handlePlaying() {
     }
     // Dance when there is audio
     uint8_t pqLevel =peakPq.read() * 30.0;
+    //Serial.println(pqLevel);
     //todo: tweak this level for good detection
     if (pqLevel > 2) danceON(); //this should delay start until audio has started...
   } 
@@ -449,31 +466,43 @@ void handlePlaying() {
 
 void danceON() {
   //check if already on, and if already on, don't restart!
-  if (analogRead(dancePartyPin1)) return; 
-
+  if (dancing) return;
+  
+  dancing = true;
   myServo.write(93);
+  rampVal = 93;
   analogWrite(dancePartyPin1, 255);
   analogWrite(dancePartyPin2, 255);
-  for (int pos = 93; pos <= 110; pos++) {
-    myServo.write(pos);
-    Serial.print("ON: ");
-    Serial.println(pos);
-    delay(50);  // Adjust delay for speed
-    //todo: do this ramp without a delay!
-  }
 }
 
 void danceOFF() {
+  if (!dancing) return;
+  dancing = false;
   myServo.write(93);
   analogWrite(dancePartyPin1, 0);
   analogWrite(dancePartyPin2, 0);
   Serial.println("OFF: 93");
 }
 
+void danceRamp() {
+  
+  if (rampVal <=110) {
+    rampVal++;
+    myServo.write(rampVal);
+    Serial.print("ON: ");
+    Serial.println(rampVal); 
+  }
+}
+
 // USB Host callback functions
 void OnPress(int key) {
   Serial.print("Key pressed: ");
   Serial.println(key);
+
+  // TV remote menu button = key 0
+  if (key == 0) {
+    danceOFF();
+  }
 
   // TV remote UP button = key 218
   if (key == 218) {
@@ -483,12 +512,9 @@ void OnPress(int key) {
   else if (key == 217) {
     currentState = PLAYING_COUNTDOWN;
   }
-  // TV remote ??? button = key ???
-  // todo - test keys and pick a good one :)
-  else if (key == 219) {
-    //play macarena
-    wavFile = "MACARENA.WAV";
-    currentState = PLAYING_WAV;
+  // TV remote back button = 216 ???
+  else if (key == 216) {
+    playFile("MACARENA.WAV", 1);
   }
   updateDisplay();
 }
@@ -510,6 +536,7 @@ void triggerPlayback() {
 
 void playFile(const char *filename, bool dance)
 {
+  if (playWav1.isPlaying()) return;
   
   Serial.print("Playing file: ");
   Serial.println(filename);
@@ -519,13 +546,19 @@ void playFile(const char *filename, bool dance)
   playWav1.play(filename);
 
   // A brief delay for the library read WAV info
-  delay(25);
+  delay(50);
 
+  if (dance && !dancing) {
+      danceON();
+  }
+  
+ 
   // Simply wait for the file to finish playing.
   while (playWav1.isPlaying()) {
-    if (dance) danceON();
-    else danceOFF();
+    //do nothing
+    Serial.print(".");
   }
+
 }
 
 void playDelay(const char *filename)
@@ -550,7 +583,9 @@ void playDelay(const char *filename)
     // sgtl5000_1.volume(vol);
     danceON();
   }
- danceOFF();
+  
+  danceOFF();
+  currentState = WAITING;
 }
 
 void handlePlayingCountdown() {
@@ -560,7 +595,6 @@ void handlePlayingCountdown() {
   // recordQueue.end();
   // recordQueue.clear();
 
-  // Play the WAV file and switch to PLAYING_WAV state
   playFile("KART.WAV",0);
   recordQueue.begin();
   recordedBlocks = 0;
@@ -569,13 +603,14 @@ void handlePlayingCountdown() {
   updateDisplay();
 }
 
+/*
 void handlePlayingWav() {
   Serial.println("Playing from SD card:" + wavFile);
 
-  // Play the WAV file and switch to PLAYING_WAV state
   playFile(wavFile.c_str(), 1);
   updateDisplay();
 }
+*/
 
 void updateDisplay() {
 
@@ -592,16 +627,19 @@ void updateDisplay() {
     case PLAYING_COUNTDOWN:
       stateText = "Get Ready!";
       break;
+    
+    /*
     case PLAYING_WAV:
       stateText = "Playing: " + wavFile;
       break;
+      */
   }
 
   display.clearDisplay();
   display.setCursor(0,0);
   display.println("DOWN BTN -> Record");
   display.println("UP BTN   -> Repeat");
-  display.println("");
+  display.println("LEFT BTN -> Macarena");
   display.print(stateText);
   display.display(); // actually display all of the above
 }
