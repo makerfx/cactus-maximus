@@ -28,6 +28,7 @@ const int myInput = AUDIO_INPUT_LINEIN;
 Chrono danceRampChrono;
 Chrono perfStatsChrono;
 Chrono delayRandomizerChrono;
+Chrono playingCheckChrono;
 
 AudioInputI2S        audioInput;         // audio shield: mic or line-in
 AudioRecordQueue     recordQueue;        // recording queue
@@ -90,8 +91,8 @@ AudioConnection c4M2(chorus4,0,mixer2,3); //right
 
 AudioConnection pwM1(playWav1,0,mixer1,0); //left
 AudioConnection pwM2(playWav1,1,mixer2,0); //right
-AudioConnection m1AO(mixer1,0,audioOutput,0);
-AudioConnection m2AO(mixer2,0,audioOutput,1);
+AudioConnection m1AO(mixer1,0,audioOutput,1);
+AudioConnection m2AO(mixer2,0,audioOutput,0); //swapped order due to using the monitor speaker
 
 AudioControlSGTL5000 audioShield;
 
@@ -133,6 +134,7 @@ String stateText = "Initializing";
 unsigned long recordingStartTime = 0;
 int playbackBlock = 0;
 bool dancing = 0;
+unsigned long danceStartTime = 0;
 
 // Servo
 Servo myServo;
@@ -166,8 +168,8 @@ void setup() {
   Serial.begin(115200);
   pinMode(dancePartyPin1, OUTPUT);
   pinMode(dancePartyPin2, OUTPUT);
-  analogWrite(dancePartyPin1, 0);
-  analogWrite(dancePartyPin2, 0);
+  digitalWrite(dancePartyPin1, 0);
+  digitalWrite(dancePartyPin2, 0);
   
     
   // Audio setup
@@ -220,7 +222,7 @@ void setup() {
 
   // Setup mixers - channel 0 for granular, channel 1 for WAV playback
   mixer1.gain(0, 1);  // WAV output (left)
-  mixer1.gain(1, .7);  // Granular output (left)
+  mixer1.gain(1, 1);  // Granular output (left)
  
   mixer2.gain(0, 1);  // WAV output (right)
   mixer2.gain(1, 1);  // Granular output (right)
@@ -277,17 +279,17 @@ void setup() {
   myServo.write(93);  // Neutral position
 
  
-  analogWrite(dancePartyPin1, 255);
-  analogWrite(dancePartyPin2, 255);
+  digitalWrite(dancePartyPin1, HIGH);
+  digitalWrite(dancePartyPin2, HIGH);
   delay(2000);
-  analogWrite(dancePartyPin1, 0);
-  analogWrite(dancePartyPin2, 0);
+  digitalWrite(dancePartyPin1, 0);
+  digitalWrite(dancePartyPin2, 0);
   
 
   // Serial.println("Listening for sound...");
   Serial.println("Type 'play' to replay last recording");
   Serial.println("Press TV remote UP button to replay");
-  Serial.println("Press TV remote DOWN button to play KART.wav");
+  Serial.println("Press TV remote DOWN button to start mimic.wav");
 
   updateDisplay();
 
@@ -303,13 +305,16 @@ void loop() {
   // Process USB Host events
   myusb.Task();
 
+//  if (dancing && currentState!=PLAYING && !playWav1.isPlaying() && playingCheckChrono.hasPassed(100)){
 
-  if (dancing && currentState!=PLAYING && !playWav1.isPlaying() && playingCheckChrono.hasPassed(100)){
+  
+  if (dancing && (currentState!=PLAYING) && (millis() - danceStartTime>1000) &&!playWav1.isPlaying() && playingCheckChrono.hasPassed(100)){
     playingCheckChrono.restart();
+    Serial.println("loop: playingCheckChrono: danceOFF");
     danceOFF();
   }
  
-  if (dancing && danceRampChrono.hasPassed(50)) {
+  if (dancing && danceRampChrono.hasPassed(100)) {
     danceRampChrono.restart();
     danceRamp();
   }
@@ -441,11 +446,14 @@ void handlePlaying() {
       playQueue.playBuffer();
       playbackBlock++;
     }
+    danceON();
+    /*
     // Dance when there is audio
     uint8_t pqLevel =peakPq.read() * 30.0;
     //Serial.println(pqLevel);
     //todo: tweak this level for good detection
     if (pqLevel > 2) danceON(); //this should delay start until audio has started...
+    */
   } 
   else {
     // Playback complete
@@ -469,6 +477,7 @@ void danceON() {
   if (dancing) return;
   
   dancing = true;
+  danceStartTime = millis();
   myServo.write(93);
   rampVal = 93;
   analogWrite(dancePartyPin1, 255);
@@ -486,7 +495,8 @@ void danceOFF() {
 
 void danceRamp() {
   
-  if (rampVal <=110) {
+  //110
+  if (rampVal <=103) {
     rampVal++;
     myServo.write(rampVal);
     Serial.print("ON: ");
@@ -512,10 +522,15 @@ void OnPress(int key) {
   else if (key == 217) {
     currentState = PLAYING_COUNTDOWN;
   }
-  // TV remote back button = 216 ???
+  // TV remote left button = 216
   else if (key == 216) {
     playFile("MACARENA.WAV", 1);
   }
+  // TV remote right button = 215
+  else if (key == 215) {
+    playFile("TEQUILA.WAV", 1);
+  }
+
   updateDisplay();
 }
 
@@ -572,7 +587,7 @@ void playDelay(const char *filename)
   playWav1.play(filename);
 
   // A brief delay for the library read WAV info
-  delay(25);
+  delay(100);
 
   // Simply wait for the file to finish playing.
   while (playWav1.isPlaying()) {
@@ -584,18 +599,19 @@ void playDelay(const char *filename)
     danceON();
   }
   
+  Serial.println("playDelay: danceOff");
   danceOFF();
   currentState = WAITING;
 }
 
 void handlePlayingCountdown() {
-  Serial.println("Playing KART.WAV from SD card...");
+  Serial.println("Playing READY.WAV from SD card...");
 
   // Make sure recordQueue is NOT running during WAV playback
   // recordQueue.end();
   // recordQueue.clear();
 
-  playFile("KART.WAV",0);
+  playFile("READY.WAV",0);
   recordQueue.begin();
   recordedBlocks = 0;
   recordingStartTime = millis();
